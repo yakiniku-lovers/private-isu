@@ -319,7 +319,7 @@ module Isuconp
           flash[:notice] = 'ファイルサイズが大きすぎます'
           redirect '/', 302
         end
-
+        
         params['file'][:tempfile].rewind
         query = 'INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?,?,?,?)'
         db.prepare(query).execute(
@@ -330,6 +330,26 @@ module Isuconp
         )
         pid = db.last_id
 
+        begin
+          params['file'][:tempfile].rewind
+          data = params["file"][:tempfile].read
+          
+          ext =
+            case params["file"][:type]
+              when /jpeg/
+                'jpg'
+              when /png/
+                'png'
+              when 'gif'
+                'gif'
+              end
+          
+          File.open("./image/#{pid}.#{ext}", "wb+").write(data)
+        rescue StandardError => e
+          p e
+          puts e.backtrace
+        end
+
         redirect "/posts/#{pid}", 302
       else
         flash[:notice] = '画像が必須です'
@@ -338,20 +358,7 @@ module Isuconp
     end
 
     get '/image/:id.:ext' do
-      if params[:id].to_i == 0
-        return ""
-      end
-
-      post = db.prepare('SELECT * FROM `posts` WHERE `id` = ?').execute(params[:id].to_i).first
-
-      if (params[:ext] == "jpg" && post[:mime] == "image/jpeg") ||
-          (params[:ext] == "png" && post[:mime] == "image/png") ||
-          (params[:ext] == "gif" && post[:mime] == "image/gif")
-        headers['Content-Type'] = post[:mime]
-        return post[:imgdata]
-      end
-
-      return 404
+      send_file "./image/#{params[:id]}.#{params[:ext]}"
     end
 
     post '/comment' do
