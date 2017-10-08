@@ -122,8 +122,7 @@ module Isuconp
             post[:user_id]
           ).first
 
-          posts.push(post) if post[:user][:del_flg] == 0
-          break if posts.length >= POSTS_PER_PAGE
+          posts.push(post)
         end
 
         posts
@@ -223,7 +222,21 @@ module Isuconp
     get '/' do
       me = get_session_user()
 
-      results = db.query('SELECT `id`, `user_id`, `body`, `created_at`, `mime` FROM `posts` ORDER BY `created_at` DESC')
+      query = <<~SQL
+        SELECT
+          `posts`.`id`,
+          `user_id`,
+          `body`,
+          `posts`.`created_at`,
+          `mime` 
+        FROM 
+          `posts` 
+        JOIN 
+          `users` ON `posts`.`user_id` = `users`.`id` AND `users`.`del_flg` = 0 
+        ORDER BY `posts`.`created_at` DESC 
+        LIMIT ?
+      SQL
+      results = db.prepare(query).execute(POSTS_PER_PAGE)
       posts = make_posts(results)
 
       erb :index, layout: :layout, locals: { posts: posts, me: me }
