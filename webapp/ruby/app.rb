@@ -122,8 +122,7 @@ module Isuconp
             post[:user_id]
           ).first
 
-          posts.push(post) if post[:user][:del_flg] == 0
-          break if posts.length >= POSTS_PER_PAGE
+          posts.push(post)
         end
 
         posts
@@ -223,7 +222,21 @@ module Isuconp
     get '/' do
       me = get_session_user()
 
-      results = db.query('SELECT `id`, `user_id`, `body`, `created_at`, `mime` FROM `posts` ORDER BY `created_at` DESC')
+      query = <<~SQL
+        SELECT
+          `posts`.`id`,
+          `user_id`,
+          `body`,
+          `posts`.`created_at`,
+          `mime` 
+        FROM 
+          `posts` 
+        JOIN 
+          `users` ON `posts`.`user_id` = `users`.`id` AND `users`.`del_flg` = 0 
+        ORDER BY `posts`.`created_at` DESC 
+        LIMIT ?
+      SQL
+      results = db.prepare(query).execute(POSTS_PER_PAGE)
       posts = make_posts(results)
 
       erb :index, layout: :layout, locals: { posts: posts, me: me }
@@ -319,7 +332,7 @@ module Isuconp
           flash[:notice] = 'ファイルサイズが大きすぎます'
           redirect '/', 302
         end
-
+        
         params['file'][:tempfile].rewind
         query = 'INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?,?,?,?)'
         db.prepare(query).execute(
@@ -330,6 +343,26 @@ module Isuconp
         )
         pid = db.last_id
 
+        begin
+          params['file'][:tempfile].rewind
+          data = params["file"][:tempfile].read
+          
+          ext =
+            case params["file"][:type]
+              when /jpeg/
+                'jpg'
+              when /png/
+                'png'
+              when 'gif'
+                'gif'
+              end
+          
+          File.open("./image/#{pid}.#{ext}", "wb+").write(data)
+        rescue StandardError => e
+          p e
+          puts e.backtrace
+        end
+
         redirect "/posts/#{pid}", 302
       else
         flash[:notice] = '画像が必須です'
@@ -338,20 +371,7 @@ module Isuconp
     end
 
     get '/image/:id.:ext' do
-      if params[:id].to_i == 0
-        return ""
-      end
-
-      post = db.prepare('SELECT * FROM `posts` WHERE `id` = ?').execute(params[:id].to_i).first
-
-      if (params[:ext] == "jpg" && post[:mime] == "image/jpeg") ||
-          (params[:ext] == "png" && post[:mime] == "image/png") ||
-          (params[:ext] == "gif" && post[:mime] == "image/gif")
-        headers['Content-Type'] = post[:mime]
-        return post[:imgdata]
-      end
-
-      return 404
+      send_file "./image/#{params[:id]}.#{params[:ext]}"
     end
 
     post '/comment' do
