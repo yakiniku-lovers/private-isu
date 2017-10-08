@@ -103,30 +103,48 @@ module Isuconp
       def make_posts(results, all_comments: false)
         posts = []
         results.to_a.each do |post|
-          query = 'SELECT * FROM `comments` WHERE `post_id` = ? ORDER BY `created_at` DESC'
-          unless all_comments
-            query += ' LIMIT 3'
-          end
-          comments = db.prepare(query).execute(
-            post[:id]
-          ).to_a
-          comments.each do |comment|
-            comment[:user] = db.prepare('SELECT * FROM `users` WHERE `id` = ?').execute(
-              comment[:user_id]
-            ).first
-          end
-          post[:comments] = comments.reverse
-          post[:comment_count] = comments.size
-
-          post[:user] = db.prepare('SELECT * FROM `users` WHERE `id` = ?').execute(
-            post[:user_id]
-          ).first
+          post = fetch_post_related_info(post, all_comments)
 
           posts.push(post) if post[:user][:del_flg] == 0
           break if posts.length >= POSTS_PER_PAGE
         end
+      end
+
+      def make_posts_opt(results, all_comments: false)
+        posts = []
+        results.to_a.each do |post|
+          post = fetch_post_related_info(post, all_comments)
+
+          posts.push(post)
+        end
 
         posts
+      end
+
+      def fetch_post_related_info(post, all_comments)
+        post[:comment_count] = db.prepare('SELECT COUNT(*) AS `count` FROM `comments` WHERE `post_id` = ?').execute(
+            post[:id]
+        ).first[:count]
+
+        query = 'SELECT * FROM `comments` WHERE `post_id` = ? ORDER BY `created_at` DESC'
+        unless all_comments
+          query += ' LIMIT 3'
+        end
+        comments = db.prepare(query).execute(
+            post[:id]
+        ).to_a
+        comments.each do |comment|
+          comment[:user] = db.prepare('SELECT * FROM `users` WHERE `id` = ?').execute(
+              comment[:user_id]
+          ).first
+        end
+        post[:comments] = comments.reverse
+
+        post[:user] = db.prepare('SELECT * FROM `users` WHERE `id` = ?').execute(
+            post[:user_id]
+        ).first
+
+        post
       end
 
       def image_url(post)
@@ -223,8 +241,22 @@ module Isuconp
     get '/' do
       me = get_session_user()
 
-      results = db.query('SELECT `id`, `user_id`, `body`, `created_at`, `mime` FROM `posts` ORDER BY `created_at` DESC')
-      posts = make_posts(results)
+      query = <<~SQL
+        SELECT
+          `posts`.`id`,
+          `user_id`,
+          `body`,
+          `posts`.`created_at`,
+          `mime` 
+        FROM 
+          `posts` 
+        JOIN 
+          `users` ON `posts`.`user_id` = `users`.`id` AND `users`.`del_flg` = 0 
+        ORDER BY `posts`.`created_at` DESC 
+        LIMIT ?
+      SQL
+      results = db.prepare(query).execute(POSTS_PER_PAGE)
+      posts = make_posts_opt(results)
 
       erb :index, layout: :layout, locals: { posts: posts, me: me }
     end
